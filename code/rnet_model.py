@@ -17,7 +17,7 @@ from pretty_print import print_example
 from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn
 
 logging.basicConfig(level=logging.INFO)
-#asdf
+
 class RNet(object):
 
 	def __init__(self, FLAGS, id2word, word2id, emb_matrix):
@@ -61,10 +61,18 @@ class RNet(object):
         # Add placeholders for inputs.
         # These are all batch-first: the None corresponds to batch_size and
         # allows you to run the same model with variable batch_size
+        print("ADDING PLACHOLERS")
+
         self.context_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len])
         self.context_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len])
 
-        #TODO: add CHARACTER IDS AND MASKS
+        # Character ID's
+
+        # TODO: add char max len
+
+        self.context_ids_c = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len, self.FLAGS.char_max_len])
+        self.qn_ids_c = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len, self.FLAGS.char_max_len])
+
         self.qn_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
@@ -85,6 +93,7 @@ class RNet(object):
           character_embeddings: shape (91, 300)
           	Pretrained character-embeddings vectors, from https://github.com/minimaxir/char-embeddings/blob/master/output/char-embeddings.txt
         """
+        print("ADDING EMBEDDINGS")
         with vs.variable_scope("word_embeddings"):
 
             # Note: the embedding matrix is a tf.constant which means it's not a trainable parameter
@@ -96,15 +105,31 @@ class RNet(object):
             self.e_qn_embs = embedding_ops.embedding_lookup(e_embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
 
 
-        with vs.variable_scope("char_embeddings"):
+        """
+        with vs.variable_scope("char_embeddings_rnn"):
         	c_embedding_matrix = tf.constant(character_embeddings, dtype=tf.float32, name="c_emb_matrix")
+        	self.c_context_embs = embedding_ops.embedding_lookup(c_embedding_matrix, self.context_ids) # shape (batch_size, context_len, max_char_len, embedding_size)
+            self.c_qn_embs = embedding_ops.embedding_lookup(c_embedding_matrix, self.qn_ids) # shape (batch_size, question_len, max_char_len, embedding_size)
 
-        	self.c_context_embs = embedding_ops.embedding_lookup(c_embedding_matrix, self.context_ids) # shape (batch_size, context_len, embedding_size)
-            self.c_qn_embs = embedding_ops.embedding_lookup(c_embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
+            context_list = tf.split(self.c_context_embs, self.FLAGS.context_len, axis=1)
 
+            #### TO DO!!!! ADD FLAGS.e_emb_dim
+            char_emb_fwd_cell = tf.contrib.rnn.GRUCell(self.FLAGS.e_emb_dim)
+            char_emb_back_cell = tf.contrib.rnn.GRUCell(self.FLAGS.e_emb_dim)
 
+            for t in range(self.FLAGS.context_len):
+                # Do a BiRNN for Char to get a word_char encoding
+                unstacked_context_t = tf.unstack(context_list[t], self.FLAGS.max_char_len, axis= 1) # split ONE WORD into a list of characters
+                # REUSE THE VARIABLES
+                if t > 0:
+                    tf.get_variable_scope().reuse_variables()
 
+                # Not sure if I should use static or dynamic
+                output, output_fwd, output_back = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(char_emb_fwd_cell, char_emb_back_cell, 
+                    unstacked_context_t, dtype='float32')
 
+                context_fwd_max = tf.reduce_max(tf.stack(output_fwd, 0), 0) # get forward embedding by max pooling
+        """
 
 
 
@@ -122,33 +147,29 @@ class RNet(object):
         # Use a RNN to get hidden states for the context and the question
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
-        encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-        context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
-        question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+        print("Question and Passage Encoding")
 
-        # Use context hidden states to attend to question hidden states
-        attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
+        unstack_context = tf.unstack(self.e_context_embs, self.FLAGS.context_len)
+        unstack_qn = tf.unstack(self.e_qn_embs, self.FLAGS.question_len)
+        with tf.variable_scope('encoding') as scope:
 
-        # Concat attn_output to context_hiddens to get blended_reps
-        blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
+            # WE CAN CHANGE THE GRU LATER WITH DROPOUT OUR SWITSH
 
-        # Apply fully connected layer to each blended representation
-        # Note, blended_reps_final corresponds to b' in the handout
-        # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
-        blended_reps_final = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
+            enc_fwd_cell = tf.contrib.rnn.GRUCell(self.FLAGS.encode_size)
+            enc_back_cell = tf.contrib.rnn.GRUCell(self.FLAGS.encode_size)
+            
+            c_output, c_fwd_output, c_back_output = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(emb_fwd_cell, emb_back_cell, 
+                    unstacked_context, dtype='float32')
 
-        # Use softmax layer to compute probability distribution for start location
-        # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
-        with vs.variable_scope("StartDist"):
-            softmax_layer_start = SimpleSoftmaxLayer()
-            self.logits_start, self.probdist_start = softmax_layer_start.build_graph(blended_reps_final, self.context_mask)
+            tf.get_variable_scope().reuse_variables()
 
-        # Use softmax layer to compute probability distribution for end location
-        # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
-        with vs.variable_scope("EndDist"):
-            softmax_layer_end = SimpleSoftmaxLayer()
-            self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
+            qn_output, q_fwd_output, q_back_output = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(emb_fwd_cell, emb_back_cell, 
+                    unstacked_context, dtype='float32')
+
+            u_Q = tf.stack(qn_output, 1)
+            u_P = tf.stack(c_output, 1)
+
+        # ADD DROPOUT TO u_Q and u_P
 
 
     def add_loss(self):
