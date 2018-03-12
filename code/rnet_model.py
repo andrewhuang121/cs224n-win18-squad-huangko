@@ -17,7 +17,7 @@ from pretty_print import print_example
 from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn
 
 logging.basicConfig(level=logging.INFO)
-
+#asdf
 class RNet(object):
 
 	def __init__(self, FLAGS, id2word, word2id, emb_matrix):
