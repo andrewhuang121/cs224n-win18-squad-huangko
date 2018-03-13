@@ -93,7 +93,7 @@ class RNet(object):
           character_embeddings: shape (91, 300)
           	Pretrained character-embeddings vectors, from https://github.com/minimaxir/char-embeddings/blob/master/output/char-embeddings.txt
         """
-        print("ADDING EMBEDDINGS")
+        print "ADDING EMBEDDINGS"
         with vs.variable_scope("word_embeddings"):
 
             # Note: the embedding matrix is a tf.constant which means it's not a trainable parameter
@@ -147,14 +147,14 @@ class RNet(object):
         # Use a RNN to get hidden states for the context and the question
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
-        print("Question and Passage Encoding")
+        print "Question and Passage Encoding"
 
         unstack_context = tf.unstack(self.e_context_embs, self.FLAGS.context_len)
         unstack_qn = tf.unstack(self.e_qn_embs, self.FLAGS.question_len)
         with tf.variable_scope('encoding') as scope:
 
-            # WE CAN CHANGE THE GRU LATER WITH DROPOUT OUR SWITSH
-
+            # WE CAN CHANGE THE GRU LATER WITH DROPOUT OUR 
+            # ADD ENCODE SIZE
             enc_fwd_cell = tf.contrib.rnn.GRUCell(self.FLAGS.encode_size)
             enc_back_cell = tf.contrib.rnn.GRUCell(self.FLAGS.encode_size)
             
@@ -166,11 +166,93 @@ class RNet(object):
             qn_output, q_fwd_output, q_back_output = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(emb_fwd_cell, emb_back_cell, 
                     unstacked_context, dtype='float32')
 
-            u_Q = tf.stack(qn_output, 1)
-            u_P = tf.stack(c_output, 1)
+            u_Q = tf.stack(qn_output, 1) # [batch, q_len, 2 * encode_size] because bidirectional stacks the forward and backward
+            u_P = tf.stack(c_output, 1) # [batch, c_len, 2 * encode_size]
 
         # ADD DROPOUT TO u_Q and u_P
 
+        print "Question-Passage Matching"
+
+
+        v_P = [] # All attention states across time
+        # each element of v_P is an attention state for one time point with dim [batch_size, encode_size]
+        for t in range(0, self.FLAGS.context_len): 
+
+            # TODO: MOVE THE VARIABLES TO SOMEWHERE ELSE APPROPRIATE
+
+            W_uQ = tf.get_variable('W_uQ', shape=(2 * self.FLAGS.encode_size, self.FLAGS.encode_size), initializer=tf.contrib.layers.xavier_initializer())
+            W_uP = tf.get_variable('W_uP', shape=(2 * self.FLAGS.encode_size, self.FLAGS.encode_size), initializer=tf.contrib.layers.xavier_initializer())
+            W_vP = tf.get_variable('W_vP', shape=(self.FLAGS.encode_size, self.FLAGS.encode_size, initializer=tf.contrib.layers.xavier_initializer()))
+            v_QP = tf.get_variable('v_QP', shape=(self.FLAGS.encode_size))
+            W_g_QP = tf.get_variable('W_g_QP', shape=(4 * self.FLAGS.encode_size, 4 * self.FLAGS.encode_size))
+
+            # TO DO: add drop prob in FLAGS
+            QP_cell = tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.FLAGS.encode_size), self.FLAGS.drop_prob)
+            QP_cell_hidden = QP_cell.zero_state(self.FLAGS.batch_size, dtype=tf.float32)
+
+            WuQ_uQ = tf.tensordot(u_Q, W_uQ, axes = [[2], [0]]) # [batch, q_len, encode_size]
+            u_P_t = tf.reshape(u_P[:,t,:], (self.FLAGS.batch_size, 1, -1)) # slice only 1 context word, [batch_size, 1, 2 * encode_size]
+            WuP_uP = tf.tensordot(u_P_t, W_uP, axes=[[2],[0]]) # [batch, 1, encode_size]
+            
+            if t==0:
+                s_t = tf.tensordot(tf.tanh(WuQ_uQ + WuP_uP), v_QP, axes=[[2],[0]]) # returns [batch, q_len]
+            else:
+                v_P_t = tf.reshape(v_P[t-1], (self.FLAGS.batch_size, 1, -1)) # [batch_size, 1, encode_size]
+                WvP_vP = tf.tensordot(v_P_t, W_vP, axes=[[2],[0]]) # [batch_size, 1, encode_size]
+                s_t = tf.tensordot(tf.tanh(WuQ_uQ + WuP_uP + WvP_vP), v_QP, axes=[[2],[0]]) # returns [batch, q_len]
+
+            a_t = tf.nn.softmax(s_t, 1) # [batch, q_len]
+            # [batch, q_len] , [batch,q_len,2*encode_size] -> [batch, 2*encode_size]
+            c_t = tf.einsum('ij,ijk->ik', a_t, u_Q) #[batch,2*encode_size]
+            
+            uPt_ct = tf.concat([tf.squeeze(u_P_t), c_t], 1) # [batch, 2 * 2 * encode_size]
+            g_t = tf.nn.sigmoid(tf.matmul(uPt_ct, W_g_QP)) # [batch, 2 * 2 * encode_size]
+            uPt_ct_star = tf.einsum('ij,ij->ij', g_t, uPt_ct)
+
+            with tf.variable_scope("QP-Matching") as scope:
+                if t > 0:
+                    tf.get_variable.reuse_variables()
+                    QP_output, QP_cell_hidden = QP_cell(uPt_ct_star, QP_cell_hidden) # both output and hidden [batch_size, encode_size]
+                    v_P.append(QP_output)
+
+        v_P = tf.stack(v_P, 1) # [batch, context_len, encode_size]
+        v_P = tf.nn.dropout(v_P, self.FLAGS.drop_prob)
+
+        print "SELF MATCHING ATTENTION"
+
+        SM_input = []
+        for t in range(0, self.FLAGS.context_len):
+            W_v_P = tf.get_variable('W_v_P', shape=(self.FLAGS.encode_size, self.FLAGS.encode_size), initializer=tf.contrib.layers.xavier_initializer())
+            W_v_P_tot = tf.get_variable('W_v_P_tot', shape=(self.FLAGS.encode_size, self.FLAGS.encode_size), initializer=tf.contrib.layers.xavier_initializer())
+
+            v_SM = tf.get_variable('v_SM', shape=(self.FLAGS.encode_size))
+
+            v_j_P = tf.reshape(v_P[:,t,:], (self.FLAGS.batch_size, 1, -1)) #Slice 1 v_P in time t [batch_size, 1, encode_size]
+            WvP_vj = tf.tensordot(v_j_P, W_v_P, axes=[[2],[0]]) # [batch, 1, encode_size]
+            WvPtot_vP = tf.tensordot(v_P, W_v_P_tot, axes=[[2], [0]]) # [batch, context_len, encode_size]
+
+            s_t = tf.tensordot(tf.tanh(WvP_vj + WvPtot_vP), v_SM, axes=[[2],[0]]) # [batch, context_len]
+            a_t = tf.nn.softmax(s_t, 1)
+            c_t = tf.einsum('ij,ijk->ik', a_t, v_P) #[batch, encode_size]
+
+            # add the gate
+            vPt_ct = tf.concat([tf.squeeze(v_j_P), c_t], 1) #[batch, 2 * encode_size]
+            g_t = tf.nn.sigmoid(vPt_ct)
+            vPt_ct_star = tf.einsum('ij,ij->ij', g_t, vPt_ct) # [batch, 2*encode_size]
+
+            SM_input.append(vPt_ct_star)
+
+        # Someone here just stacked and then unstack, not sure why so I will just directly use SM_input
+
+        with tf.variable_scope("self_matching") as scope:
+            SM_fwd_cell = tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.FLAGS.encode_size), self.FLAGS.drop_prob)
+            SM_back_cel = tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.FLAGS.encode_size), self.FLAGS.drop_prob)
+            SM_outputs, SM_final_fwd, SM_final_back = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(SM_fwd_cell, SM_back_cell, SM_input, dtype=tf.float32)
+            h_P = tf.stack(SM_outputs, 1)
+
+        h_P = tf.nn.dropout(h_P, self.FLAGS.drop_prob)
+
+        print "OUTPUT LAYER"
 
     def add_loss(self):
         """
