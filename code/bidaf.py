@@ -103,22 +103,28 @@ class BiDAF(object):
 
 
 	def build_graph(self):
+		print "Encoding"
 		with tf.variable_scope('Encoding'):
 			encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
 			Q = encoder.build_graph(self.qn_embs, self.qn_mask)
 			H = encoder.build_graph(self.context_embs, self.context_mask)
 
+		print "Bidirectional Attnetion Flow"
 		with tf.variable_scope('Attention_flow'):
 			attn_layer = BiDAF_attn(self.keep_prob, self.FLAGS.question_len, self.FLAGS.context_len)
 			G = attn_layer.build_graph(H, self.context_mask, Q, self.qn_mask)
 
+		print "Modeling"
 		with tf.variable_scope('Modeling'):
 			modeling_layer = ModelingLayer(self.FLAGS.hidden_size, self.keep_prob)
-			M = modeling_layer.build_graph(G, self.FLAGS.context_mask) # M [batch, context_len, hidden_size]
+			M = modeling_layer.build_graph(G, self.context_mask) # M [batch, context_len, hidden_size]
 
+		print "Output"
 		with tf.variable_scope("Output"):
 			output_layer = OutputLayer(2* self.FLAGS.hidden_size, self.keep_prob)
 			self.logits_start, self.logits_end = output_layer.build_graph(G, M, self.context_mask)
+
+		print "Complete"
 
 	def add_loss(self):
 

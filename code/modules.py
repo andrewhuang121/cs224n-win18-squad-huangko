@@ -204,7 +204,7 @@ class OutputLayer(object):
 
         p1 = masked_softmax(tf.tensordot(wTp1, tf.concat([G, M], 2), axes=[[0],[2]]), masks, 1)
 
-        init_state = self.output_lstm.zero_state(tf.shape(M)[0])
+        init_state = self.output_lstm.zero_state(tf.shape(M)[0], dtype=tf.float32)
         M2 = self.output_lstm(M, init_state)
 
         p2 = masked_softmax(tf.tensordot(wTp2, tf.concat([G, M2], 2), axes=[[0],[2]]), masks, 1)
