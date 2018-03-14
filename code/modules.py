@@ -195,17 +195,19 @@ class OutputLayer(object):
     def __init__(self, hidden_size, keep_prob):
         self.hidden_size = hidden_size # this should be 2 * self.FLAGS.hidden_size
         self.keep_prob = keep_prob
-        self.output_lstm = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+        self.fwd = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size / 2), input_keep_prob=self.keep_prob)
+        self.back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size / 2), input_keep_prob=self.keep_prob)
 
     def build_graph(self, G, M, masks):
         # mask should be [batch, context_len]
         wTp1 = tf.get_variable('wTp1', shape=(G.shape[2] + M.shape[2]), dtype=tf.float32)
         wTp2 = tf.get_variable('wTp2', shape=(G.shape[2] + M.shape[2]), dtype=tf.float32)
 
+        input_lens = tf.reduce_sum(masks, reduction_indices=1)
+
         p1 = masked_softmax(tf.tensordot(wTp1, tf.concat([G, M], 2), axes=[[0],[2]]), masks, 1)
 
-        init_state = self.output_lstm.zero_state(tf.shape(M)[0], dtype=tf.float32)
-        M2 = self.output_lstm(M, init_state)
+        M2 = tf.nn.bidirectional_dynamic_rnn(self.fwd, self.back, M, input_lens, dtype=tf.float32)
 
         p2 = masked_softmax(tf.tensordot(wTp2, tf.concat([G, M2], 2), axes=[[0],[2]]), masks, 1)
 
