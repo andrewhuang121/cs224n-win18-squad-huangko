@@ -113,61 +113,136 @@ class SimpleSoftmaxLayer(object):
 
             return masked_logits, prob_dist
 
+class BiDAF_attn(object):
+    def __init__(self, keep_prob, query_vec_size, context_vec_size):
+        self.keep_prob = keep_prob
+        self.query_vec_size = query_vec_size
+        self.context_vec_size = context_vec_size
+
+    def build_graph(self, context, context_mask, query, query_mask):
+        '''
+        context: should be [batch, context_length, context_encode_size]
+        querys: should be  [batch, query_length, query_encode_size]
+        context_mask: [batch_size, context_length]
+        querys_mask: [batch_size, query_length]
+        '''
+        with tf.variable_scope("BIDAF_attn"):
+            encode_size = context.shape[2]
+
+            w1T = tf.get_variable('w1T', shape=(encode_size), initializer=tf.contrib.layers.xavier_initializer())
+            w2T = tf.get_variable('w2T', shape=(encode_size), initializer=tf.contrib.layers.xavier_initializer())
+            w3T = tf.get_variable('w3T', shape=(encode_size), initializer=tf.contrib.layers.xavier_initializer())
+
+            query_t = tf.reshape(tf.matmul(context, w1T), (-1, 1, self.query_vec_size))
+            context_t = tf.reshape(tf.matmul(querys, w2T), (-1, self.context_vec_size, 1))
+            context_dot_query_t = tf.einsum('iaj,ibj->iab', tf.multiply(context, w3T), query)
+            similarity = query_t + context_t + context_dot_query_t # should be [batch, context_length, query_length]
+
+            with tf.variable_scope("Context2Query"):
+                #softmax over query
+                query_logits_mask = tf.expand_dims(query_mask, 1) #[batch, 1, query_length] ::: adding the same mask at each context
+                _, attn_query = masked_softmax(similarity, query_logits_mask, 2) # [batch, context_len, query_len]
+                U_tild = tf.einsum('ijk,ikl->ijl', attn_query, query) #[batch, context_len, encode] each context word selects a combination of query words
+
+            with tf.variable_scope("Query2Context"):
+                _, attn_context = masked_softmax(tf.reduce_max(similarity, 2), context_mask, 1) # [batch, context_len], [batch, context_len] -> [batch, context_len]
+                H_tild = tf.einsum('ij,ijl->il', attn_context, context) #[batch, encode]
+                H_tild = tf.tile(tf.expand_dims(H_tild, 1), [1, context.shape[1],1]) # [batch, context_len, encode]
+
+            # combine attentions
+            G = tf.concat([context, U_tild, tf.multiply(context, U_tild), tf.multiply(context, H_tild)], 2) #[batch, context_len, 4 * encode]
+
+            return G
+
+class ModelingLayer(object):
+
+    def __init__(self, hidden_size, keep_prob):
+        """
+        Inputs:
+          hidden_size: int. Hidden size of the RNN
+          keep_prob: Tensor containing a single scalar that is the keep probability (for dropout)
+        """
+        self.hidden_size = hidden_size
+        self.keep_prob = keep_prob
+        self.g0_fwd = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+        self.g0_back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+        self.g1_fwd = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+        self.g1_back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+        self.multi_fwd = MultiRNNCell([self.g0_fwd, self.g1_fwd])
+        self.multi_back = MultiRNNCell([self.g0_back, self.g1_back])
+
+    def build_graph(self, inputs, masks):
+        #inputs should be [batch, context_len, some encode_size]
+        # mask [batch, context_len]
+
+        input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
+
+        # Note: fw_out and bw_out are the hidden states for every timestep.
+        # Each is shape (batch_size, seq_len, hidden_size).
+        (fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.multi_fwd, self.multi_back, inputs, input_lens, dtype=tf.float32)
+
+        # Concatenate the forward and backward hidden states
+        M = tf.concat([fw_out, bw_out], 2)
+
+        # Apply dropout
+        M = tf.nn.dropout(out, self.keep_prob)
+
+        return M
 
 class BasicAttn(object):
     """Module for basic attention.
 
-    Note: in this module we use the terminology of "keys" and "values" (see lectures).
-    In the terminology of "X attends to Y", "keys attend to values".
+    Note: in this module we use the terminology of "querys" and "context" (see lectures).
+    In the terminology of "X attends to Y", "querys attend to context".
 
-    In the baseline model, the keys are the context hidden states
-    and the values are the question hidden states.
+    In the baseline model, the querys are the context hidden states
+    and the context are the question hidden states.
 
-    We choose to use general terminology of keys and values in this module
+    We choose to use general terminology of querys and context in this module
     (rather than context and question) to avoid confusion if you reuse this
     module with other inputs.
     """
 
-    def __init__(self, keep_prob, key_vec_size, value_vec_size):
+    def __init__(self, keep_prob, query_vec_size, context_vec_size):
         """
         Inputs:
           keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
-          key_vec_size: size of the key vectors. int
-          value_vec_size: size of the value vectors. int
+          query_vec_size: size of the query vectors. int
+          context_vec_size: size of the context vectors. int
         """
         self.keep_prob = keep_prob
-        self.key_vec_size = key_vec_size
-        self.value_vec_size = value_vec_size
+        self.query_vec_size = query_vec_size
+        self.context_vec_size = context_vec_size
 
-    def build_graph(self, values, values_mask, keys):
+    def build_graph(self, context, context_mask, querys):
         """
-        Keys attend to values.
-        For each key, return an attention distribution and an attention output vector.
+        querys attend to context.
+        For each query, return an attention distribution and an attention output vector.
 
         Inputs:
-          values: Tensor shape (batch_size, num_values, value_vec_size).
-          values_mask: Tensor shape (batch_size, num_values).
+          context: Tensor shape (batch_size, num_context, context_vec_size).
+          context_mask: Tensor shape (batch_size, num_context).
             1s where there's real input, 0s where there's padding
-          keys: Tensor shape (batch_size, num_keys, value_vec_size)
+          querys: Tensor shape (batch_size, num_querys, context_vec_size)
 
         Outputs:
-          attn_dist: Tensor shape (batch_size, num_keys, num_values).
-            For each key, the distribution should sum to 1,
-            and should be 0 in the value locations that correspond to padding.
-          output: Tensor shape (batch_size, num_keys, hidden_size).
-            This is the attention output; the weighted sum of the values
+          attn_dist: Tensor shape (batch_size, num_querys, num_context).
+            For each query, the distribution should sum to 1,
+            and should be 0 in the context locations that correspond to padding.
+          output: Tensor shape (batch_size, num_querys, hidden_size).
+            This is the attention output; the weighted sum of the context
             (using the attention distribution as weights).
         """
         with vs.variable_scope("BasicAttn"):
 
             # Calculate attention distribution
-            values_t = tf.transpose(values, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
-            attn_logits = tf.matmul(keys, values_t) # shape (batch_size, num_keys, num_values)
-            attn_logits_mask = tf.expand_dims(values_mask, 1) # shape (batch_size, 1, num_values)
-            _, attn_dist = masked_softmax(attn_logits, attn_logits_mask, 2) # shape (batch_size, num_keys, num_values). take softmax over values
+            context_t = tf.transpose(context, perm=[0, 2, 1]) # (batch_size, context_vec_size, num_context)
+            attn_logits = tf.matmul(querys, context_t) # shape (batch_size, num_querys, num_context)
+            attn_logits_mask = tf.expand_dims(context_mask, 1) # shape (batch_size, 1, num_context)
+            _, attn_dist = masked_softmax(attn_logits, attn_logits_mask, 2) # shape (batch_size, num_querys, num_context). take softmax over context
 
-            # Use attention distribution to take weighted sum of values
-            output = tf.matmul(attn_dist, values) # shape (batch_size, num_keys, value_vec_size)
+            # Use attention distribution to take weighted sum of context
+            output = tf.matmul(attn_dist, context) # shape (batch_size, num_querys, context_vec_size)
 
             # Apply dropout
             output = tf.nn.dropout(output, self.keep_prob)
