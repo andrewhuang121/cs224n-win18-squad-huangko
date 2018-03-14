@@ -18,7 +18,7 @@ from modules import RNNEncoder, BiDAF_attn, ModelingLayer, OutputLayer
 
 logging.basicConfig(level=logging.INFO)
 
-class BIDAF(object):
+class BiDAF(object):
 
 	def __init__(self, FLAGS, id2word, word2id, emb_matrix):
 		print 'Initializing RNet Model'
@@ -113,12 +113,12 @@ class BIDAF(object):
 			G = attn_layer.build_graph(H, self.context_mask, Q, self.qn_mask)
 
 		with tf.variable_scope('Modeling'):
-			modeling_layer = ModelingLayer(2 * self.FLAGS.hidden_size, self.keep_prob)
-			M = modeling_layer.build_graph(G, self.FLAGS.context_mask)
+			modeling_layer = ModelingLayer(self.FLAGS.hidden_size, self.keep_prob)
+			M = modeling_layer.build_graph(G, self.FLAGS.context_mask) # M [batch, context_len, hidden_size]
 
 		with tf.variable_scope("Output"):
 			output_layer = OutputLayer(2* self.FLAGS.hidden_size, self.keep_prob)
-			self.logits_start, self.logits_end = output_layer(G, M, self.context_mask)
+			self.logits_start, self.logits_end = output_layer.build_graph(G, M, self.context_mask)
 
 	def add_loss(self):
 

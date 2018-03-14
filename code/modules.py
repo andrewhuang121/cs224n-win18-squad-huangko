@@ -133,8 +133,8 @@ class BiDAF_attn(object):
             w2T = tf.get_variable('w2T', shape=(encode_size), initializer=tf.contrib.layers.xavier_initializer())
             w3T = tf.get_variable('w3T', shape=(encode_size), initializer=tf.contrib.layers.xavier_initializer())
 
-            query_t = tf.reshape(tf.tensordot(context, w1T, axes=[[2],[0]]), (-1, 1, self.query_vec_size)) #[batch, 1, query_len]
-            context_t = tf.reshape(tf.tensordot(querys, w2T, axes=[[2],[0]]), (-1, self.context_vec_size, 1)) #[batch, context_len, 1]
+            query_t = tf.reshape(tf.tensordot(query, w1T, axes=[[2],[0]]), (-1, 1, self.query_vec_size)) #[batch, 1, query_len]
+            context_t = tf.reshape(tf.tensordot(context, w2T, axes=[[2],[0]]), (-1, self.context_vec_size, 1)) #[batch, context_len, 1]
             context_dot_query_t = tf.einsum('iaj,ibj->iab', tf.multiply(context, w3T), query) #[batch, context_len, query_len]
             similarity = query_t + context_t + context_dot_query_t # should be [batch, context_length, query_length]
 
@@ -202,12 +202,12 @@ class OutputLayer(object):
         wTp1 = tf.get_variable('wTp1', shape=(G.shape[2] + M.shape[2]), dtype=tf.float32)
         wTp2 = tf.get_variable('wTp2', shape=(G.shape[2] + M.shape[2]), dtype=tf.float32)
 
-        p1 = masked_softmax(tf.tensordot(wTp1, tf.concat([G, M], 2), axes=[[0],[2]]), masks)
+        p1 = masked_softmax(tf.tensordot(wTp1, tf.concat([G, M], 2), axes=[[0],[2]]), masks, 1)
 
         init_state = self.output_lstm.zero_state(tf.shape(M)[0])
         M2 = self.output_lstm(M, init_state)
 
-        p2 = masked_softmax(tf.tensordot(wTp2, tf.concat([G, M2], 2), axes=[[0],[2]]), masks)
+        p2 = masked_softmax(tf.tensordot(wTp2, tf.concat([G, M2], 2), axes=[[0],[2]]), masks, 1)
 
         return p1, p2
 
