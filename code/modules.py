@@ -207,7 +207,8 @@ class OutputLayer(object):
 
         p1 = masked_softmax(tf.tensordot(wTp1, tf.concat([G, M], 2), axes=[[0],[2]]), masks, 1)
 
-        M2 = tf.nn.bidirectional_dynamic_rnn(self.fwd, self.back, M, input_lens, dtype=tf.float32)
+        (fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.fwd, self.back, M, input_lens, dtype=tf.float32)
+        M2 = tf.concat([fw_out, bw_out], 2)
 
         p2 = masked_softmax(tf.tensordot(wTp2, tf.concat([G, M2], 2), axes=[[0],[2]]), masks, 1)
 
