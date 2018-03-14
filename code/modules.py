@@ -151,7 +151,8 @@ class BiDAF_attn(object):
 
             # combine attentions
             G = tf.concat([context, U_tild, tf.multiply(context, U_tild), tf.multiply(context, H_tild)], 2) #[batch, context_len, 4 * encode]
-
+            G = tf.nn.dropout(G, self.keep_prob)
+            
             return G
 
 class ModelingLayer(object):
@@ -185,9 +186,30 @@ class ModelingLayer(object):
         M = tf.concat([fw_out, bw_out], 2)
 
         # Apply dropout
-        M = tf.nn.dropout(out, self.keep_prob)
+        M = tf.nn.dropout(M, self.keep_prob)
 
         return M
+
+class OutputLayer(object):
+
+    def __init__(self, hidden_size, keep_prob):
+        self.hidden_size = hidden_size # this should be 2 * self.FLAGS.hidden_size
+        self.keep_prob = keep_prob
+        self.output_lstm = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+
+    def build_graph(self, G, M, masks):
+        # mask should be [batch, context_len]
+        wTp1 = tf.get_variable('wTp1', shape=(G.shape[2] + M.shape[2]), dtype=tf.float32)
+        wTp2 = tf.get_variable('wTp2', shape=(G.shape[2] + M.shape[2]), dtype=tf.float32)
+
+        p1 = masked_softmax(tf.tensordot(wTp1, tf.concat([G, M], 2), axes=[[0],[2]]), masks)
+
+        init_state = self.output_lstm.zero_state(tf.shape(M)[0])
+        M2 = self.output_lstm(M, init_state)
+
+        p2 = masked_softmax(tf.tensordot(wTp2, tf.concat([G, M2], 2), axes=[[0],[2]]), masks)
+
+        return p1, p2
 
 class BasicAttn(object):
     """Module for basic attention.
