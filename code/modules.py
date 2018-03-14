@@ -19,7 +19,6 @@ from tensorflow.python.ops.rnn_cell import DropoutWrapper
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import rnn_cell
 
-
 class RNNEncoder(object):
     """
     General-purpose module to encode a sequence using a RNN.
