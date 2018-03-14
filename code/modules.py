@@ -133,9 +133,9 @@ class BiDAF_attn(object):
             w2T = tf.get_variable('w2T', shape=(encode_size), initializer=tf.contrib.layers.xavier_initializer())
             w3T = tf.get_variable('w3T', shape=(encode_size), initializer=tf.contrib.layers.xavier_initializer())
 
-            query_t = tf.reshape(tf.matmul(context, w1T), (-1, 1, self.query_vec_size))
-            context_t = tf.reshape(tf.matmul(querys, w2T), (-1, self.context_vec_size, 1))
-            context_dot_query_t = tf.einsum('iaj,ibj->iab', tf.multiply(context, w3T), query)
+            query_t = tf.reshape(tf.matmul(context, tf.expand_dims(w1T, 1)), (-1, 1, self.query_vec_size)) #[batch, 1, query_len]
+            context_t = tf.reshape(tf.matmul(querys, tf.expand_dims(w2T, 1)), (-1, self.context_vec_size, 1)) #[batch, context_len, 1]
+            context_dot_query_t = tf.einsum('iaj,ibj->iab', tf.multiply(context, w3T), query) #[batch, context_len, query_len]
             similarity = query_t + context_t + context_dot_query_t # should be [batch, context_length, query_length]
 
             with tf.variable_scope("Context2Query"):
@@ -152,7 +152,7 @@ class BiDAF_attn(object):
             # combine attentions
             G = tf.concat([context, U_tild, tf.multiply(context, U_tild), tf.multiply(context, H_tild)], 2) #[batch, context_len, 4 * encode]
             G = tf.nn.dropout(G, self.keep_prob)
-            
+
             return G
 
 class ModelingLayer(object):
