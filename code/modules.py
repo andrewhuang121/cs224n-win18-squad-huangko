@@ -168,8 +168,8 @@ class ModelingLayer(object):
         self.g0_back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
         self.g1_fwd = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
         self.g1_back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
-        self.multi_fwd = MultiRNNCell([self.g0_fwd, self.g1_fwd])
-        self.multi_back = MultiRNNCell([self.g0_back, self.g1_back])
+        self.multi_fwd = rnn_cell.MultiRNNCell([self.g0_fwd, self.g1_fwd])
+        self.multi_back = rnn_cell.MultiRNNCell([self.g0_back, self.g1_back])
 
     def build_graph(self, inputs, masks):
         #inputs should be [batch, context_len, some encode_size]
