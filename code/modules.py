@@ -205,14 +205,14 @@ class OutputLayer(object):
 
         input_lens = tf.reduce_sum(masks, reduction_indices=1)
 
-        p1 = masked_softmax(tf.tensordot(wTp1, tf.concat([G, M], 2), axes=[[0],[2]]), masks, 1)
+        masked_logits_p1, p1 = masked_softmax(tf.tensordot(wTp1, tf.concat([G, M], 2), axes=[[0],[2]]), masks, 1)
 
         (fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.fwd, self.back, M, input_lens, dtype=tf.float32)
         M2 = tf.concat([fw_out, bw_out], 2)
 
-        p2 = masked_softmax(tf.tensordot(wTp2, tf.concat([G, M2], 2), axes=[[0],[2]]), masks, 1)
+        masked_logits_p2, p2 = masked_softmax(tf.tensordot(wTp2, tf.concat([G, M2], 2), axes=[[0],[2]]), masks, 1)
 
-        return p1, p2
+        return masked_logits_p1, p1, masked_logits_p2, p2
 
 class BasicAttn(object):
     """Module for basic attention.

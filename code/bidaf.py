@@ -122,7 +122,7 @@ class BiDAF(object):
 		print "Output"
 		with tf.variable_scope("Output"):
 			output_layer = OutputLayer(2* self.FLAGS.hidden_size, self.keep_prob)
-			self.logits_start, self.logits_end = output_layer.build_graph(G, M, self.context_mask)
+			self.logits_start, self.probdist_start, self.logits_end, self.probdist_end = output_layer.build_graph(G, M, self.context_mask)
 
 		print "Complete"
 
