@@ -43,9 +43,9 @@ class RNNEncoder(object):
         """
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
-        self.rnn_cell_fw = rnn_cell.GRUCell(self.hidden_size)
+        self.rnn_cell_fw = rnn_cell.LSTMCell(self.hidden_size)
         self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
-        self.rnn_cell_bw = rnn_cell.GRUCell(self.hidden_size)
+        self.rnn_cell_bw = rnn_cell.LSTMCell(self.hidden_size)
         self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
 
     def build_graph(self, inputs, masks):
@@ -165,12 +165,12 @@ class ModelingLayer(object):
         """
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
-        self.g0_fwd = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
-        self.g0_back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
-        self.g1_fwd = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
-        self.g1_back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
-        self.multi_fwd = rnn_cell.MultiRNNCell([self.g0_fwd, self.g1_fwd])
-        self.multi_back = rnn_cell.MultiRNNCell([self.g0_back, self.g1_back])
+        self.g0 = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+        #self.g0_back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+        self.g1 = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+        #self.g1_back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+        self.multi_fwd = rnn_cell.MultiRNNCell([self.g0, self.g1])
+        self.multi_back = rnn_cell.MultiRNNCell([self.g0, self.g1])
 
     def build_graph(self, inputs, masks):
         #inputs should be [batch, context_len, some encode_size]
@@ -195,8 +195,8 @@ class OutputLayer(object):
     def __init__(self, hidden_size, keep_prob):
         self.hidden_size = hidden_size # this should be 2 * self.FLAGS.hidden_size
         self.keep_prob = keep_prob
-        self.fwd = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size / 2), input_keep_prob=self.keep_prob)
-        self.back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size / 2), input_keep_prob=self.keep_prob)
+        #self.fwd = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size / 2), input_keep_prob=self.keep_prob)
+        #self.back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size / 2), input_keep_prob=self.keep_prob)
 
     def build_graph(self, G, M, masks):
         # mask should be [batch, context_len]
@@ -207,10 +207,10 @@ class OutputLayer(object):
 
         masked_logits_p1, p1 = masked_softmax(tf.tensordot(wTp1, tf.concat([G, M], 2), axes=[[0],[2]]), masks, 1)
 
-        (fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.fwd, self.back, M, input_lens, dtype=tf.float32)
-        M2 = tf.concat([fw_out, bw_out], 2)
+        #(fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.fwd, self.back, M, input_lens, dtype=tf.float32)
+        #M2 = tf.concat([fw_out, bw_out], 2)
 
-        masked_logits_p2, p2 = masked_softmax(tf.tensordot(wTp2, tf.concat([G, M2], 2), axes=[[0],[2]]), masks, 1)
+        masked_logits_p2, p2 = masked_softmax(tf.tensordot(wTp2, tf.concat([G, M], 2), axes=[[0],[2]]), masks, 1)
 
         return masked_logits_p1, p1, masked_logits_p2, p2
 
