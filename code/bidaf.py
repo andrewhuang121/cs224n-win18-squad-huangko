@@ -57,8 +57,8 @@ class BiDAF(object):
 
 	def build_ema(self):
 		self.ema = tf.train.ExponentialMovingAverage(self.FLAGS.exp_moving_avg)
-		tensors = tf.get_collection("ema/scalar", scope=self.scope) + tf.get_collection("ema/vector", scope=self.scope)
-		ema_op = ema.apply(tensors)
+		tensors = tf.trainable_variables()
+		ema_op = self.ema.apply(tensors)
 		return ema_op
 
 	def add_placeholders(self):
