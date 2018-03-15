@@ -26,6 +26,8 @@ class BiDAF(object):
 		self.id2word = id2word
 		self.word2id = word2id
 
+		self.ema_op = self.build_ema()
+
 		#TODO: ADD CHARACTER to id, etc
 
 		# Add all parts of the graph
@@ -53,6 +55,11 @@ class BiDAF(object):
 		self.bestmodel_saver = tf.train.Saver(tf.global_variables(), max_to_keep=1)
 		self.summaries = tf.summary.merge_all()
 
+	def build_ema(self):
+		self.ema = tf.train.ExponentialMovingAverage(self.FLAGS.exp_moving_avg)
+		tensors = tf.get_collection("ema/scalar", scope=self.scope) + tf.get_collection("ema/vector", scope=self.scope)
+		ema_op = ema.apply(tensors)
+		return ema_op
 
 	def add_placeholders(self):
 
@@ -170,10 +177,10 @@ class BiDAF(object):
 		input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
 
 		# output_feed contains the things we want to fetch.
-		output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
+		output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm, self.ema_op]
 
 		# Run the model
-		[_, summaries, loss, global_step, param_norm, gradient_norm] = session.run(output_feed, input_feed)
+		[_, summaries, loss, global_step, param_norm, gradient_norm, ema_op] = session.run(output_feed, input_feed)
 
 		# All summaries in the graph are added to Tensorboard
 		summary_writer.add_summary(summaries, global_step)
