@@ -29,7 +29,7 @@ class BiDAF(object):
 		#TODO: ADD CHARACTER to id, etc
 
 		# Add all parts of the graph
-		with tf.variable_scope("RNet", initializer=tf.contrib.layers.variance_scaling_initializer(factor=1.0, uniform=True)):
+		with tf.variable_scope("BiDAF", initializer=tf.contrib.layers.variance_scaling_initializer(factor=1.0, uniform=True)):
 			self.add_placeholders()
 			self.add_embedding_layer(emb_matrix)
 			self.build_graph()
