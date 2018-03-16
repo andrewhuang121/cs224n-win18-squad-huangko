@@ -54,7 +54,7 @@ tf.app.flags.DEFINE_integer("batch_size", 60, "Batch size to use")
 tf.app.flags.DEFINE_integer("hidden_size", 100, "Size of the hidden states")
 tf.app.flags.DEFINE_integer("context_len", 300, "The maximum context length of your model")
 tf.app.flags.DEFINE_integer("question_len", 25, "The maximum question length of your model")
-tf.app.flags.DEFINE_integer("embedding_size", 300, "Size of the pretrained word vectors. This needs to be one of the available GloVe dimensions: 50/100/200/300")
+tf.app.flags.DEFINE_integer("embedding_size", 50, "Size of the pretrained word vectors. This needs to be one of the available GloVe dimensions: 50/100/200/300")
 
 
 # How often to print, save, eval

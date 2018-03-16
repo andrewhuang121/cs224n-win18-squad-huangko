@@ -43,10 +43,9 @@ class RNNEncoder(object):
         """
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
-        self.rnn_cell_fw = rnn_cell.LSTMCell(self.hidden_size)
-        self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
-        self.rnn_cell_bw = rnn_cell.LSTMCell(self.hidden_size)
-        self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
+        self.rnn_cell_fw = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+        self.rnn_cell_bw = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+     
 
     def build_graph(self, inputs, masks):
         """
@@ -166,11 +165,11 @@ class ModelingLayer(object):
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
         self.g0 = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
-        #self.g0_back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+        self.g0_back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
         self.g1 = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
-        #self.g1_back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
+        self.g1_back = DropoutWrapper(rnn_cell.LSTMCell(self.hidden_size), input_keep_prob=self.keep_prob)
         self.multi_fwd = rnn_cell.MultiRNNCell([self.g0, self.g1])
-        self.multi_back = rnn_cell.MultiRNNCell([self.g0, self.g1])
+        self.multi_back = rnn_cell.MultiRNNCell([self.g0_back, self.g1_back])
 
     def build_graph(self, inputs, masks):
         #inputs should be [batch, context_len, some encode_size]
