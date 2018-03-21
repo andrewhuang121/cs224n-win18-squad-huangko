@@ -47,7 +47,10 @@ class BiDAF(object):
 		# Define optimizer and updates
 		# (updates is what you need to fetch in session.run to do a gradient update)
 		self.global_step = tf.Variable(0, name="global_step", trainable=False)
-		opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
+
+		#decay: drop by factor of 10 every 6k iters
+		decayed_lr = tf.train.exponential_decay(FLAGS.learning_rate, self.global_step, 6000, 0.1, staircase=True) 
+		opt = tf.train.AdamOptimizer(learning_rate=decayed_lr) # you can try other optimizers
 		self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
 
 		# Define savers (for checkpointing) and summaries (for tensorboard)
@@ -226,9 +229,27 @@ class BiDAF(object):
 		start_dist, end_dist = self.get_prob_dists(session, batch)
 
 		# Take argmax to get start_pos and end_post, both shape (batch_size)
-		start_pos = np.argmax(start_dist, axis=1)
-		end_pos = np.argmax(end_dist, axis=1)
-
+		start_pos = np.zeros(shape=(start_dist.shape[0]), dtype=np.int32)
+		end_pos = np.zeros(shape=(end_dist.shape[0]), dtype=np.int32)
+		for i in range(start_dist.shape[0]):
+			start = start_dist[i, :]
+			end = end_dist[i, :]
+			best_start_max = start[0], 0
+			best_end_max = end[0], 0
+			best_prod = best_start_max[0] * best_end_max[0]
+			best_pair = best_start_max, best_end_max
+			for j in range(len(start)):
+				if start[j] > best_start_max[0]:
+					best_start_max = start[j], j
+					best_end_max = end[j], j
+				else:
+					if end[j] > best_end_max[0]:
+						best_end_max = end[j], j
+				if best_start_max[0] * best_end_max[0] > best_prod and best_end_max[1] - best_start_max[1] <= 30:
+					best_prod = best_start_max[0] * best_end_max[0]
+					best_pair = (best_start_max, best_end_max)
+			start_pos[i] = best_pair[0][1]
+			end_pos[i] = best_pair[1][1]
 		return start_pos, end_pos
 
 
